@@ -14,11 +14,11 @@ def build_graph():
             graph[row["from"]].update({row["to"]: row["weight"]})
         except KeyError as e:
             graph[e.args[0]] = {row["to"]: row["weight"]}
-    return graph
+    return graph, len(graph), len(df)
 
 
 def main():
-    graph = build_graph()
+    graph, max_vertices, max_edges = build_graph()
 
     print()
 

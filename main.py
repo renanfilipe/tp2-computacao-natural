@@ -1,17 +1,17 @@
 import pandas as pd
 from not_random import NotRandom
 
-FILE_NAME = "data/graph2.txt"
+FILE_NAME = "data/graph1.txt"
 
-ANTS = 5000
-ITERATIONS = 100
-DECAY = 0.05
-ALPHA = 1
-BETA = 1.1
+ANTS = 100
+ITERATIONS = 3000
+DECAY = 0.1
+ALPHA = 1.5
+BETA = 0.5
 N_BESTS = 1
 
 MAX_MIN_RULE = True
-MIN_PHEROMONE = 0.8
+MIN_PHEROMONE = 1.0
 MAX_PHEROMONE = 1.5
 
 random = NotRandom()
@@ -23,18 +23,16 @@ def build_graph() -> tuple:
     for _, row in df.iterrows():
         try:
             graph[row["from"]].update({
-                row["to"]: {
-                    "weight": row["weight"],
-                    "pheromone": 1.0
-                }
+                row["to"]: {"weight": row["weight"]}
             })
         except KeyError as e:
             graph[e.args[0]] = {
-                row["to"]: {
-                    "weight": row["weight"],
-                    "pheromone": 1.0
-                }
+                row["to"]: {"weight": row["weight"]}
             }
+        if MAX_MIN_RULE:
+            graph[row["from"]][row["to"]]["pheromone"] = row["weight"] * MAX_PHEROMONE
+        else:
+            graph[row["from"]][row["to"]]["pheromone"] = 1.0
     return graph, len(graph), len(df)
 
 
@@ -78,16 +76,16 @@ def apply_pheromone(graph: dict, ants: list):
             for j in range(1, len(ants[i]["path"])):
                 from_node = ants[i]["path"][j-1]
                 to_node = ants[i]["path"][j]
-                # graph[from_node][to_node]["pheromone"] += 1/graph[from_node][to_node]["weight"]
-                graph[from_node][to_node]["pheromone"] += 1/ants[i]["fitness"]
-            for node in graph:
-                for item in graph[node]:
-                    graph[node][item]["pheromone"] *= (1 - DECAY)
-                    if MAX_MIN_RULE:
-                        if graph[node][item]["pheromone"] > (graph[node][item]["weight"] * MAX_PHEROMONE):
-                            graph[node][item]["pheromone"] = graph[node][item]["weight"] * MAX_PHEROMONE
-                        elif graph[node][item]["pheromone"] < (graph[node][item]["weight"] * MIN_PHEROMONE):
-                            graph[node][item]["pheromone"] = graph[node][item]["weight"] * MIN_PHEROMONE
+                if MAX_MIN_RULE:
+                    graph[from_node][to_node]["pheromone"] = \
+                        (1 - DECAY) * graph[from_node][to_node]["pheromone"] + (MAX_PHEROMONE - graph[from_node][to_node]["pheromone"])
+                    if graph[from_node][to_node]["pheromone"] > (graph[from_node][to_node]["weight"] * MAX_PHEROMONE):
+                        graph[from_node][to_node]["pheromone"] = graph[from_node][to_node]["weight"] * MAX_PHEROMONE
+                    elif graph[from_node][to_node]["pheromone"] < (graph[from_node][to_node]["weight"] * MIN_PHEROMONE):
+                        graph[from_node][to_node]["pheromone"] = graph[from_node][to_node]["weight"] * MIN_PHEROMONE
+                else:
+                    graph[from_node][to_node]["pheromone"] = \
+                        (1 - DECAY) * graph[from_node][to_node]["pheromone"] + 1 / ants[i]["fitness"]
 
 def main():
     # build graph from file

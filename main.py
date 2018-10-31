@@ -1,122 +1,103 @@
 import pandas as pd
-from not_random import NotRandom
-import time
-
-start_time = time.time()
+import numpy as np
+# from not_random import NotRandom
+import timeit
+import json
+import multiprocessing as mp
 
 FILE_NAME = "data/graph2.txt"
 
-ANTS = 500
-ITERATIONS = 3000
+ANTS = 0
+ITERATIONS = 10
 DECAY = 0.05
 ALPHA = 1.5
 BETA = 0.7
 N_BESTS = 1
 
-MAX_MIN_RULE = True
 MIN_PHEROMONE = 0.8
 MAX_PHEROMONE = 1.5
 
-random = NotRandom()
+random = np.random
 
 
 def build_graph() -> tuple:
     df = pd.read_csv(FILE_NAME, sep="\t")
     graph = dict()
+    # row = ["from", "to, "distance"]
     for row in df.itertuples(index=False):
-        # row = ["from", "to, "weight"]
-        if row[0] in graph:
-            graph[row[0]].update({
-                row[1]: {"weight": row[2]}
-            })
-        else:
-            graph[row[0]] = {
-                row[1]: {"weight": row[2]}
-            }
-        if MAX_MIN_RULE:
-            graph[row[0]][row[1]]["pheromone"] = row[2] * MAX_PHEROMONE
-        else:
-            graph[row[0]][row[1]]["pheromone"] = 1.0
-    return graph, len(graph)
+        try:
+            graph[row[0]].update({row[1]: {"distance": row[2], "pheromone": row[2] * MAX_PHEROMONE}})
+        except KeyError:
+            graph[row[0]] = {row[1]: {"distance": row[2], "pheromone": row[2] * MAX_PHEROMONE}}
+    return graph, len(graph), len(df)
 
 
-def build_solution(graph: dict, destination: int, starting_node=1) -> dict:
-    current_node = starting_node
-    ant = {"path": [starting_node], "fitness": 0, "valid_solution": False}
+def build_solution(graph: dict, destination: int) -> dict:
+    current_node = 1
+    ant = {"path": [1], "fitness": 0}
     while current_node != destination:
         possible_nodes = get_possible_nodes(ant["path"], graph[current_node])
-        if not possible_nodes:
+        try:
+            next_node = random.choice(a=[*possible_nodes.keys()], p=[*possible_nodes.values()])
+            ant["path"].append(next_node)
+            ant["fitness"] += graph[current_node][next_node]["distance"]
+            current_node = next_node
+        except ValueError:
             break
-        next_node = random.choice(
-            a=[*possible_nodes.keys()],
-            p=[*possible_nodes.values()]
-        )
-        ant["path"].append(next_node)
-        ant["fitness"] += graph[current_node][next_node]["weight"]
-        current_node = next_node
-    if ant["path"][-1] == destination:
-        ant["valid_solution"] = True
+    # invalid paths will have their fitness value set to 0
+    if ant["path"][-1] != destination:
+        ant["fitness"] = 0
     return ant
 
 
 def get_possible_nodes(path: list, node: dict) -> dict:
-    result = {}
     # result = {node: probability}
+    result = {}
+    # dic used to speed up the process of checking if a key is in the list, try and except are faster than ifs
+    dict_list = {item: None for item in path}
     for item in node:
-        if item not in path:
+        try:
+            dict_list[item]
+        except KeyError:
             # pheromone ^ alpha * (1.0 / distance) ^ beta
-            probability = node[item]["pheromone"] ** ALPHA * (1.0/node[item]["weight"]) ** BETA
-            result.update({item: probability})
+            result.update({item: node[item]["pheromone"] ** ALPHA * (1.0/node[item]["distance"]) ** BETA})
     # making the sum of the all probabilities equals to 1
-    total_pheromone = sum([result[x] for x in result])
+    total_p = sum([result[x] for x in result])
     for item in result:
-        result[item] = result[item]/total_pheromone
+        result[item] = result[item]/total_p
     return result
 
 
-def apply_pheromone(graph: dict, ants: list):
-    for i in range(N_BESTS):
-        if ants[i]["valid_solution"]:
-            for j in range(1, len(ants[i]["path"])):
-                from_node = ants[i]["path"][j-1]
-                to_node = ants[i]["path"][j]
-                if MAX_MIN_RULE:
-                    graph[from_node][to_node]["pheromone"] = (1 - DECAY) * graph[from_node][to_node]["pheromone"]\
-                                                             + (MAX_PHEROMONE - graph[from_node][to_node]["pheromone"])
-                    if graph[from_node][to_node]["pheromone"] > (graph[from_node][to_node]["weight"] * MAX_PHEROMONE):
-                        graph[from_node][to_node]["pheromone"] = graph[from_node][to_node]["weight"] * MAX_PHEROMONE
-                    elif graph[from_node][to_node]["pheromone"] < (graph[from_node][to_node]["weight"] * MIN_PHEROMONE):
-                        graph[from_node][to_node]["pheromone"] = graph[from_node][to_node]["weight"] * MIN_PHEROMONE
-                else:
-                    graph[from_node][to_node]["pheromone"] = \
-                        (1 - DECAY) * graph[from_node][to_node]["pheromone"] + 1 / ants[i]["fitness"]
+def apply_pheromone(graph: dict, ant: dict):
+    for j in range(1, len(ant["path"])):
+        node = graph[ant["path"][j-1]][ant["path"][j]]
+        node["pheromone"] = (1 - DECAY) * node["pheromone"] + MAX_PHEROMONE - node["pheromone"]
+        node["pheromone"] = max(node["distance"] * MIN_PHEROMONE, min(node["distance"] * MAX_PHEROMONE, node["pheromone"]))
 
 
-def main():
+def start():
     # build graph from file
-    graph, max_nodes = build_graph()
-    t = 1
-    best_solution = {"fitness": 0}
-    while t < ITERATIONS:
-        # reset ants path and its fitness
-        ants = []
-        for _ in range(ANTS):
-            # build a valid path
-            ants.append(build_solution(graph, max_nodes, 1))
+    global ANTS
+    solutions = {}
+    for i in range(1):
+        plot_solution = []
+        graph, max_nodes, max_edges = build_graph()
+        ANTS = max_edges
+        best_solution = {"fitness": 0}
+        for t in range(ITERATIONS):
+            # create a list of ants with its path and its fitness. the list is sorted by the highest fitness
+            ants = sorted([build_solution(graph, max_nodes) for _ in range(ANTS)], key=lambda k: k["fitness"], reverse=True)
+            # update the best solution
+            best_solution = max(ants[0], best_solution, key=lambda k: k["fitness"])
+            # apply pheromone and the pheromone's decay
+            apply_pheromone(graph, ants[0])
+            plot_solution.append(best_solution["fitness"])
+            print("%d: %d all time best: %d" % (i, t, best_solution["fitness"]))
+        # print("%d all time best: %d" % (i, best_solution["fitness"]))
+        solutions.update({i: plot_solution})
+    with open('graph1_ants_edges-ite_1000-decay_005-alp_15-beta_07-minphe_08-maxphe_15.json', 'w') as outfile:
+        json.dump(solutions, outfile)
+    print()
 
-        # sort the ants by the highest fitness
-        ants = sorted(ants, key=lambda k: k['fitness'], reverse=True)
-
-        # update the best solution
-        if ants[0]["fitness"] > best_solution["fitness"]:
-            best_solution = ants[0]
-
-        # apply pheromone and the pheromone decay
-        apply_pheromone(graph, ants)
-        print(t, "- current best:", ants[0]["fitness"])
-        print(t, "- all time best:", best_solution["fitness"])
-        t += 1
-    print("My program took", time.time() - start_time, "to run")
-
-
-main()
+# start()
+print(timeit.timeit(setup = 'from main import start', stmt = 'start()', number = 10))
